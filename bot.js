@@ -21,6 +21,7 @@ const userProfiles = new Map(); // User profiles with XP, level, stats
 const userCrews = new Map(); // Crew storage
 const dailyChallengeLog = new Map(); // Track daily challenge completion
 const achievements = new Map(); // User achievements
+const helpCommandUsed = new Set(); // Track which guilds have used help command
 
 // Default user profile structure
 function createUserProfile(userId) {
@@ -324,6 +325,10 @@ const commands = [
   new SlashCommandBuilder()
     .setName('tournament')
     .setDescription('View or create a racing tournament.'),
+
+  new SlashCommandBuilder()
+    .setName('help')
+    .setDescription('Display all available bot commands (one-time use per server).'),
 ];
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
@@ -913,9 +918,22 @@ client.on('interactionCreate', async interaction => {
           if (userCrews.has(crewName)) {
             return interaction.reply({ content: `Crew **${crewName}** already exists!`, ephemeral: true });
           }
-          userCrews.set(crewName, { name: crewName, captain: interaction.user.id, members: [interaction.user.id] });
-          userProfile.crew = crewName;
-          await interaction.reply({ content: `✅ Created crew **${crewName}**! You are the captain.`, ephemeral: true });
+          try {
+            const crewCategory = guild.channels.cache.find(c => c.name === 'crews' && c.isCategory());
+            const newChannel = await guild.channels.create({
+              name: crewName.toLowerCase().replace(/\s+/g, '-'),
+              type: 0, // Text channel
+              parent: crewCategory?.id,
+              topic: `${crewName} Racing Crew`
+            });
+            userCrews.set(crewName, { name: crewName, captain: interaction.user.id, members: [interaction.user.id], channelId: newChannel.id });
+            userProfile.crew = crewName;
+            await interaction.reply({ content: `✅ Created crew **${crewName}**! You are the captain. Team channel: ${newChannel}`, ephemeral: true });
+          } catch (error) {
+            userCrews.set(crewName, { name: crewName, captain: interaction.user.id, members: [interaction.user.id], channelId: null });
+            userProfile.crew = crewName;
+            await interaction.reply({ content: `✅ Created crew **${crewName}**! You are the captain. (Channel creation requires category named "crews")`, ephemeral: true });
+          }
         } else if (crewAction === 'join') {
           if (!userCrews.has(crewName)) {
             return interaction.reply({ content: `Crew **${crewName}** not found!`, ephemeral: true });
@@ -926,7 +944,8 @@ client.on('interactionCreate', async interaction => {
           }
           crew.members.push(interaction.user.id);
           userProfile.crew = crewName;
-          await interaction.reply({ content: `✅ Joined crew **${crewName}**!`, ephemeral: true });
+          const crewMsg = crew.channelId ? ` Access crew channel <#${crew.channelId}>!` : '';
+          await interaction.reply({ content: `✅ Joined crew **${crewName}**!${crewMsg}`, ephemeral: true });
         }
         break;
 
@@ -1026,6 +1045,30 @@ client.on('interactionCreate', async interaction => {
           )
           .setColor(0xff6600);
         await interaction.reply({ embeds: [tournamentEmbed] });
+        break;
+
+      case 'help':
+        if (helpCommandUsed.has(guild.id)) {
+          return interaction.reply({ content: 'This command has already been used in this server! The help message is pinned above.', ephemeral: true });
+        }
+        
+        helpCommandUsed.add(guild.id);
+        
+        const helpEmbed = new EmbedBuilder()
+          .setTitle('🏁 Racing Nation Bot - Commands List')
+          .setDescription('Complete list of all available commands')
+          .addFields(
+            { name: '👤 PROFILE & COMMUNITY', value: '`/profile` - View racing profile\n`/leaderboard` - Top racers by XP\n`/ranking` - Your rank & standing\n`/achievements` - View badges earned\n`/favorite` - Set favorite track', inline: false },
+            { name: '👥 CREW SYSTEM', value: '`/crew` - Create or join a racing crew\n`/crew-members` - List crew members', inline: false },
+            { name: '🎮 FUN & CHALLENGES', value: '`/dailychallenge` - Daily XP reward\n`/trivia` - Random trivia question\n`/track` - Random racing track info\n`/tournament` - Racing tournament info', inline: false },
+            { name: '🛡️ MODERATION (Race Control role)', value: '`/kick` - Remove user\n`/ban` - Ban user\n`/unban` - Unban user\n`/tempban` - Temp ban (hours)\n`/mute` - Timeout user\n`/unmute` - Remove timeout\n`/warn` - Warn user\n`/warnings` - Check warnings\n`/clearwarnings` - Clear all warnings\n`/purge` - Delete messages\n`/nick` - Change nickname\n`/roleadd` - Add role\n`/roleremove` - Remove role\n`/lock` - Lock channel\n`/unlock` - Unlock channel\n`/slowmode` - Set slowmode\n`/announce` - Send announcement\n`/logs` - View moderation logs\n`/report` - Report a user (everyone)', inline: false },
+            { name: '📊 INFO COMMANDS', value: '`/ping` - Bot latency\n`/uptime` - Bot uptime\n`/botinfo` - Bot statistics\n`/serverinfo` - Server info\n`/userinfo` - User details\n`/roles` - List user roles\n`/avatar` - Show user avatar\n`/channelinfo` - Channel details\n`/invite` - Bot invite link\n`/randommember` - Random member\n`/countroles` - Role counts\n`/vote` - Create poll\n`/say` - Bot repeats message\n`/serverbanner` - Server banner', inline: false }
+          )
+          .setFooter({ text: 'React 👍 if this helps! | This command can only be used once per server.' })
+          .setColor(0xff6600);
+        
+        const msg = await interaction.reply({ embeds: [helpEmbed] });
+        await msg.pin();
         break;
 
       default:
