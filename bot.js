@@ -242,6 +242,10 @@ const commands = [
     .setName('logs')
     .setDescription('View moderation logs.')
     .addIntegerOption(option => option.setName('limit').setDescription('Number of logs to show (default 10)').setRequired(false)),
+
+  new SlashCommandBuilder()
+    .setName('track')
+    .setDescription('Get information about a random racing track.'),
 ];
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
@@ -749,6 +753,33 @@ client.on('interactionCreate', async interaction => {
           logsEmbed.addFields({ name: `#${recentLogs.length - index}`, value: logText, inline: false });
         });
         await interaction.reply({ embeds: [logsEmbed], ephemeral: true });
+        break;
+
+      case 'track':
+        const tracks = [
+          { name: 'Silverstone', country: 'United Kingdom', length: '5.891 km', lapRecord: '1:27.369', type: 'Circuit', famous: 'Historic F1 venue, high speed' },
+          { name: 'Monaco Grand Prix', country: 'Monaco', length: '3.337 km', lapRecord: '1:14.260', type: 'Street Circuit', famous: 'Most prestigious street race, iconic barriers' },
+          { name: 'Nürburgring', country: 'Germany', length: '20.832 km', lapRecord: '6:52.300', type: 'Road Course', famous: 'Longest and most challenging track' },
+          { name: 'Spa-Francorchamps', country: 'Belgium', length: '7.004 km', lapRecord: '1:46.286', type: 'High Speed', famous: 'Eau Rouge, extreme weather conditions' },
+          { name: 'Monza', country: 'Italy', length: '5.793 km', lapRecord: '1:21.046', type: 'High Speed', famous: 'Fastest track, Italian GP venue' },
+          { name: 'Suzuka', country: 'Japan', length: '5.807 km', lapRecord: '1:27.064', type: 'Figure-8 Circuit', famous: 'Unique figure-8 design, Racing mecca' },
+          { name: 'Laguna Seca', country: 'USA', length: '3.602 km', lapRecord: '1:08.209', type: 'Road Course', famous: 'Corkscrew corner, technical track' },
+          { name: 'Fuji Speedway', country: 'Japan', length: '4.563 km', lapRecord: '1:16.689', type: 'High Banked', famous: 'Mount Fuji views, high speed' },
+          { name: 'Road Atlanta', country: 'USA', length: '4.048 km', lapRecord: '1:12.346', type: 'Road Course', famous: 'Smooth fast circuit, great for racing' },
+          { name: 'Bathurst', country: 'Australia', length: '6.213 km', lapRecord: '2:03.780', type: 'Mountain Circuit', famous: 'Iconic Conrod straight, Mount Panorama' }
+        ];
+        const randomTrack = tracks[Math.floor(Math.random() * tracks.length)];
+        const trackEmbed = new EmbedBuilder()
+          .setTitle(`🏁 ${randomTrack.name}`)
+          .addFields(
+            { name: 'Country', value: randomTrack.country, inline: true },
+            { name: 'Track Length', value: randomTrack.length, inline: true },
+            { name: 'Type', value: randomTrack.type, inline: true },
+            { name: 'Lap Record', value: randomTrack.lapRecord, inline: true },
+            { name: 'Famous For', value: randomTrack.famous, inline: false }
+          )
+          .setColor(0xff6600);
+        await interaction.reply({ embeds: [trackEmbed] });
         break;
 
       default:
