@@ -17,6 +17,43 @@ const GUILD_ID = '1449765717942472868';
 let startTime = Date.now();
 const warnings = new Map(); // In-memory storage for warnings
 const moderationLogs = []; // Store all moderation actions
+const userProfiles = new Map(); // User profiles with XP, level, stats
+const userCrews = new Map(); // Crew storage
+const dailyChallengeLog = new Map(); // Track daily challenge completion
+const achievements = new Map(); // User achievements
+
+// Default user profile structure
+function createUserProfile(userId) {
+  return {
+    userId: userId,
+    xp: 0,
+    level: 1,
+    wins: 0,
+    races: 0,
+    achievements: [],
+    crew: null,
+    favoriteTrack: null,
+    bio: 'Racing Nation Member',
+    joinedDate: new Date()
+  };
+}
+
+// Function to get or create user profile
+function getUserProfile(userId) {
+  if (!userProfiles.has(userId)) {
+    userProfiles.set(userId, createUserProfile(userId));
+  }
+  return userProfiles.get(userId);
+}
+
+// XP and leveling system
+function addXP(userId, amount) {
+  const profile = getUserProfile(userId);
+  profile.xp += amount;
+  const xpPerLevel = 1000;
+  profile.level = Math.floor(profile.xp / xpPerLevel) + 1;
+  return profile.level;
+}
 
 // Function to get bot-logs channel
 async function getBotLogsChannel(guild) {
@@ -246,6 +283,47 @@ const commands = [
   new SlashCommandBuilder()
     .setName('track')
     .setDescription('Get information about a random racing track.'),
+
+  new SlashCommandBuilder()
+    .setName('profile')
+    .setDescription('View your racing profile.')
+    .addUserOption(option => option.setName('user').setDescription('User to view profile (default: yourself)').setRequired(false)),
+
+  new SlashCommandBuilder()
+    .setName('leaderboard')
+    .setDescription('View top racers by XP/level.'),
+
+  new SlashCommandBuilder()
+    .setName('crew')
+    .setDescription('Create or join a racing crew.')
+    .addStringOption(option => option.setName('action').setDescription('create or join').setRequired(true).addChoices({ name: 'create', value: 'create' }, { name: 'join', value: 'join' }))
+    .addStringOption(option => option.setName('crewname').setDescription('Crew name to create/join').setRequired(true)),
+
+  new SlashCommandBuilder()
+    .setName('crew-members')
+    .setDescription('List your crew members.'),
+
+  new SlashCommandBuilder()
+    .setName('achievements')
+    .setDescription('View your achievements and badges.')
+    .addUserOption(option => option.setName('user').setDescription('User to view achievements (default: yourself)').setRequired(false)),
+
+  new SlashCommandBuilder()
+    .setName('ranking')
+    .setDescription('View your rank and standing.'),
+
+  new SlashCommandBuilder()
+    .setName('favorite')
+    .setDescription('Set your favorite track.')
+    .addStringOption(option => option.setName('track').setDescription('Track name').setRequired(true)),
+
+  new SlashCommandBuilder()
+    .setName('dailychallenge')
+    .setDescription('Complete today\'s racing challenge.'),
+
+  new SlashCommandBuilder()
+    .setName('tournament')
+    .setDescription('View or create a racing tournament.'),
 ];
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
@@ -788,6 +866,166 @@ client.on('interactionCreate', async interaction => {
           )
           .setColor(0xff6600);
         await interaction.reply({ embeds: [trackEmbed] });
+        break;
+
+      case 'profile':
+        const profileUser = interaction.options.getUser('user') || interaction.user;
+        const profile = getUserProfile(profileUser.id);
+        const profileEmbed = new EmbedBuilder()
+          .setTitle(`🏁 ${profileUser.tag}'s Racing Profile`)
+          .setThumbnail(profileUser.displayAvatarURL())
+          .addFields(
+            { name: 'Level', value: profile.level.toString(), inline: true },
+            { name: 'XP', value: `${profile.xp} / ${profile.level * 1000}`, inline: true },
+            { name: 'Races Completed', value: profile.races.toString(), inline: true },
+            { name: 'Wins', value: profile.wins.toString(), inline: true },
+            { name: 'Win Rate', value: profile.races > 0 ? `${((profile.wins / profile.races) * 100).toFixed(1)}%` : 'N/A', inline: true },
+            { name: 'Crew', value: profile.crew || 'None', inline: true },
+            { name: 'Favorite Track', value: profile.favoriteTrack || 'Not set', inline: false },
+            { name: 'Bio', value: profile.bio, inline: false },
+            { name: 'Member Since', value: profile.joinedDate.toDateString(), inline: false }
+          )
+          .setColor(0x00ff00);
+        await interaction.reply({ embeds: [profileEmbed] });
+        break;
+
+      case 'leaderboard':
+        const sortedUsers = Array.from(userProfiles.values()).sort((a, b) => b.xp - a.xp).slice(0, 10);
+        const leaderboardEmbed = new EmbedBuilder()
+          .setTitle('🏆 Racing Leaderboard')
+          .setColor(0xffd700);
+        sortedUsers.forEach((user, index) => {
+          leaderboardEmbed.addFields({
+            name: `#${index + 1} - Level ${user.level}`,
+            value: `<@${user.userId}> | ${user.xp} XP | ${user.wins} Wins`,
+            inline: false
+          });
+        });
+        await interaction.reply({ embeds: [leaderboardEmbed] });
+        break;
+
+      case 'crew':
+        const crewAction = interaction.options.getString('action');
+        const crewName = interaction.options.getString('crewname');
+        const userProfile = getUserProfile(interaction.user.id);
+        
+        if (crewAction === 'create') {
+          if (userCrews.has(crewName)) {
+            return interaction.reply({ content: `Crew **${crewName}** already exists!`, ephemeral: true });
+          }
+          userCrews.set(crewName, { name: crewName, captain: interaction.user.id, members: [interaction.user.id] });
+          userProfile.crew = crewName;
+          await interaction.reply({ content: `✅ Created crew **${crewName}**! You are the captain.`, ephemeral: true });
+        } else if (crewAction === 'join') {
+          if (!userCrews.has(crewName)) {
+            return interaction.reply({ content: `Crew **${crewName}** not found!`, ephemeral: true });
+          }
+          const crew = userCrews.get(crewName);
+          if (crew.members.includes(interaction.user.id)) {
+            return interaction.reply({ content: `You're already in crew **${crewName}**!`, ephemeral: true });
+          }
+          crew.members.push(interaction.user.id);
+          userProfile.crew = crewName;
+          await interaction.reply({ content: `✅ Joined crew **${crewName}**!`, ephemeral: true });
+        }
+        break;
+
+      case 'crew-members':
+        const userCrew = getUserProfile(interaction.user.id).crew;
+        if (!userCrew) {
+          return interaction.reply({ content: 'You are not in a crew!', ephemeral: true });
+        }
+        const crewData = userCrews.get(userCrew);
+        const crewListEmbed = new EmbedBuilder()
+          .setTitle(`👥 ${userCrew} Members`)
+          .setDescription(crewData.members.map((id, i) => `${i + 1}. <@${id}>`).join('\n'))
+          .setFooter({ text: `Captain: <@${crewData.captain}>` })
+          .setColor(0x0000ff);
+        await interaction.reply({ embeds: [crewListEmbed] });
+        break;
+
+      case 'achievements':
+        const achieveUser = interaction.options.getUser('user') || interaction.user;
+        const achieveProfile = getUserProfile(achieveUser.id);
+        const achieveList = [
+          { name: '🥇 First Win', condition: achieveProfile.wins >= 1 },
+          { name: '🏁 Racer', condition: achieveProfile.races >= 5 },
+          { name: '⭐ Pro Racer', condition: achieveProfile.level >= 5 },
+          { name: '👑 Champion', condition: achieveProfile.wins >= 20 },
+          { name: '🚀 Speedster', condition: achieveProfile.races >= 50 },
+          { name: '🎖️ Veteran', condition: achieveProfile.races >= 100 }
+        ];
+        const unlockedAchievements = achieveList.filter(a => a.condition);
+        const achievementsEmbed = new EmbedBuilder()
+          .setTitle(`🏆 ${achieveUser.tag}'s Achievements`)
+          .setDescription(unlockedAchievements.length > 0 ? unlockedAchievements.map(a => a.name).join('\n') : 'No achievements yet!')
+          .setFooter({ text: `${unlockedAchievements.length}/${achieveList.length} unlocked` })
+          .setColor(0xffa500);
+        await interaction.reply({ embeds: [achievementsEmbed] });
+        break;
+
+      case 'ranking':
+        const rankProfile = getUserProfile(interaction.user.id);
+        const userRank = Array.from(userProfiles.values()).filter(u => u.xp > rankProfile.xp).length + 1;
+        const totalUsers = userProfiles.size;
+        const rankEmbed = new EmbedBuilder()
+          .setTitle("🎯 Your Ranking")
+          .addFields(
+            { name: 'Rank', value: `#${userRank} of ${totalUsers}`, inline: true },
+            { name: 'Level', value: rankProfile.level.toString(), inline: true },
+            { name: 'Total XP', value: rankProfile.xp.toString(), inline: true },
+            { name: 'Progress to Next Level', value: `${rankProfile.xp % 1000}/1000 XP`, inline: true }
+          )
+          .setColor(0x9370db);
+        await interaction.reply({ embeds: [rankEmbed] });
+        break;
+
+      case 'favorite':
+        const favTrack = interaction.options.getString('track');
+        const favProfile = getUserProfile(interaction.user.id);
+        favProfile.favoriteTrack = favTrack;
+        await interaction.reply({ content: `✅ Set your favorite track to **${favTrack}**!`, ephemeral: true });
+        break;
+
+      case 'dailychallenge':
+        const today = new Date().toDateString();
+        const challengeKey = `${interaction.user.id}-${today}`;
+        
+        if (dailyChallengeLog.has(challengeKey)) {
+          return interaction.reply({ content: 'You already completed today\'s challenge! Come back tomorrow.', ephemeral: true });
+        }
+        
+        const xpReward = 100;
+        addXP(interaction.user.id, xpReward);
+        dailyChallengeLog.set(challengeKey, true);
+        const challengeProfile = getUserProfile(interaction.user.id);
+        challengeProfile.races += 1;
+        
+        const challengeEmbed = new EmbedBuilder()
+          .setTitle('🏁 Daily Challenge Complete!')
+          .addFields(
+            { name: 'XP Earned', value: `+${xpReward} XP`, inline: true },
+            { name: 'New Level', value: challengeProfile.level.toString(), inline: true },
+            { name: 'Total XP', value: challengeProfile.xp.toString(), inline: true }
+          )
+          .setColor(0x00ff00);
+        await interaction.reply({ embeds: [challengeEmbed] });
+        break;
+
+      case 'tournament':
+        const tournamentChannel = guild.channels.cache.find(channel => channel.name === 'tournament');
+        if (!tournamentChannel) {
+          return interaction.reply({ content: 'Tournament channel not found!', ephemeral: true });
+        }
+        const tournamentEmbed = new EmbedBuilder()
+          .setTitle('🏆 Racing Tournament')
+          .setDescription('Use the tournament channel to organize and track ongoing tournaments!')
+          .addFields(
+            { name: 'Status', value: 'Awaiting participants', inline: true },
+            { name: 'Channel', value: tournamentChannel.toString(), inline: true }
+          )
+          .setColor(0xff6600);
+        await interaction.reply({ embeds: [tournamentEmbed] });
         break;
 
       default:
