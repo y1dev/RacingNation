@@ -1,3 +1,5 @@
+const http = require('http');
+http.createServer((req, res) => res.end('Bot is running!')).listen(process.env.PORT || 8080);
 require('dotenv').config();
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
@@ -14,6 +16,11 @@ const GUILD_ID = '1449765717942472868';
 
 let startTime = Date.now();
 const warnings = new Map(); // In-memory storage for warnings
+
+// Function to get bot-logs channel
+async function getBotLogsChannel(guild) {
+  return guild.channels.cache.find(channel => channel.name === 'bot-logs');
+}
 
 const commands = [
   // Moderation Commands
@@ -216,14 +223,22 @@ client.on('interactionCreate', async interaction => {
         const kickReason = interaction.options.getString('reason') || 'No reason provided';
         const kickMember = await guild.members.fetch(kickUser.id);
         await kickMember.kick(kickReason);
-        await interaction.reply(`Kicked ${kickUser.tag} for: ${kickReason}`);
+        await interaction.reply({ content: `Kicked ${kickUser.tag} for: ${kickReason}`, ephemeral: true });
+        const botLogsChannel = await getBotLogsChannel(guild);
+        if (botLogsChannel) {
+          await botLogsChannel.send(`**Kick Command Used**\nUser: ${interaction.user.tag}\nTarget: ${kickUser.tag}\nReason: ${kickReason}\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'ban':
         const banUser = interaction.options.getUser('user');
         const banReason = interaction.options.getString('reason') || 'No reason provided';
         await guild.members.ban(banUser, { reason: banReason });
-        await interaction.reply(`Banned ${banUser.tag} for: ${banReason}`);
+        await interaction.reply({ content: `Banned ${banUser.tag} for: ${banReason}`, ephemeral: true });
+        const botLogsChannelBan = await getBotLogsChannel(guild);
+        if (botLogsChannelBan) {
+          await botLogsChannelBan.send(`**Ban Command Used**\nUser: ${interaction.user.tag}\nTarget: ${banUser.tag}\nReason: ${banReason}\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'mute':
@@ -236,7 +251,11 @@ client.on('interactionCreate', async interaction => {
         setTimeout(async () => {
           await muteMember.roles.remove(muteRole);
         }, muteTime * 60000);
-        await interaction.reply(`Muted ${muteUser.tag} for ${muteTime} minutes.`);
+        await interaction.reply({ content: `Muted ${muteUser.tag} for ${muteTime} minutes.`, ephemeral: true });
+        const botLogsChannelMute = await getBotLogsChannel(guild);
+        if (botLogsChannelMute) {
+          await botLogsChannelMute.send(`**Mute Command Used**\nUser: ${interaction.user.tag}\nTarget: ${muteUser.tag}\nDuration: ${muteTime} minutes\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'unmute':
@@ -245,7 +264,11 @@ client.on('interactionCreate', async interaction => {
         const unmuteRole = guild.roles.cache.find(role => role.name === 'Muted');
         if (!unmuteRole) return interaction.reply('Muted role not found.');
         await unmuteMember.roles.remove(unmuteRole);
-        await interaction.reply(`Unmuted ${unmuteUser.tag}.`);
+        await interaction.reply({ content: `Unmuted ${unmuteUser.tag}.`, ephemeral: true });
+        const botLogsChannelUnmute = await getBotLogsChannel(guild);
+        if (botLogsChannelUnmute) {
+          await botLogsChannelUnmute.send(`**Unmute Command Used**\nUser: ${interaction.user.tag}\nTarget: ${unmuteUser.tag}\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'warn':
@@ -254,7 +277,11 @@ client.on('interactionCreate', async interaction => {
         const userWarnings = warnings.get(warnUser.id) || [];
         userWarnings.push({ reason: warnReason, date: new Date() });
         warnings.set(warnUser.id, userWarnings);
-        await interaction.reply(`Warned ${warnUser.tag} for: ${warnReason}`);
+        await interaction.reply({ content: `Warned ${warnUser.tag} for: ${warnReason}`, ephemeral: true });
+        const botLogsChannelWarn = await getBotLogsChannel(guild);
+        if (botLogsChannelWarn) {
+          await botLogsChannelWarn.send(`**Warn Command Used**\nUser: ${interaction.user.tag}\nTarget: ${warnUser.tag}\nReason: ${warnReason}\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'warnings':
@@ -264,13 +291,21 @@ client.on('interactionCreate', async interaction => {
           .setTitle(`Warnings for ${warningsUser.tag}`)
           .setDescription(userWarns.length ? userWarns.map((w, i) => `${i+1}. ${w.reason} (${w.date.toDateString()})`).join('\n') : 'No warnings.')
           .setColor(0xff0000);
-        await interaction.reply({ embeds: [embed] });
+        await interaction.reply({ embeds: [embed], ephemeral: true });
+        const botLogsChannelWarnings = await getBotLogsChannel(guild);
+        if (botLogsChannelWarnings) {
+          await botLogsChannelWarnings.send(`**Warnings Command Used**\nUser: ${interaction.user.tag}\nTarget: ${warningsUser.tag}\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'purge':
         const amount = interaction.options.getInteger('amount');
         await interaction.channel.bulkDelete(amount);
-        await interaction.reply(`Deleted ${amount} messages.`);
+        await interaction.reply({ content: `Deleted ${amount} messages.`, ephemeral: true });
+        const botLogsChannelPurge = await getBotLogsChannel(guild);
+        if (botLogsChannelPurge) {
+          await botLogsChannelPurge.send(`**Purge Command Used**\nUser: ${interaction.user.tag}\nChannel: ${interaction.channel.name}\nAmount: ${amount}\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'nick':
@@ -278,7 +313,11 @@ client.on('interactionCreate', async interaction => {
         const nickname = interaction.options.getString('nickname');
         const nickMember = await guild.members.fetch(nickUser.id);
         await nickMember.setNickname(nickname);
-        await interaction.reply(`Changed ${nickUser.tag}'s nickname to ${nickname}.`);
+        await interaction.reply({ content: `Changed ${nickUser.tag}'s nickname to ${nickname}.`, ephemeral: true });
+        const botLogsChannelNick = await getBotLogsChannel(guild);
+        if (botLogsChannelNick) {
+          await botLogsChannelNick.send(`**Nick Command Used**\nUser: ${interaction.user.tag}\nTarget: ${nickUser.tag}\nNew Nickname: ${nickname}\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'roleadd':
@@ -286,7 +325,11 @@ client.on('interactionCreate', async interaction => {
         const roleAdd = interaction.options.getRole('role');
         const roleAddMember = await guild.members.fetch(roleAddUser.id);
         await roleAddMember.roles.add(roleAdd);
-        await interaction.reply(`Added role ${roleAdd.name} to ${roleAddUser.tag}.`);
+        await interaction.reply({ content: `Added role ${roleAdd.name} to ${roleAddUser.tag}.`, ephemeral: true });
+        const botLogsChannelRoleAdd = await getBotLogsChannel(guild);
+        if (botLogsChannelRoleAdd) {
+          await botLogsChannelRoleAdd.send(`**Roleadd Command Used**\nUser: ${interaction.user.tag}\nTarget: ${roleAddUser.tag}\nRole: ${roleAdd.name}\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'roleremove':
@@ -294,44 +337,72 @@ client.on('interactionCreate', async interaction => {
         const roleRemove = interaction.options.getRole('role');
         const roleRemoveMember = await guild.members.fetch(roleRemoveUser.id);
         await roleRemoveMember.roles.remove(roleRemove);
-        await interaction.reply(`Removed role ${roleRemove.name} from ${roleRemoveUser.tag}.`);
+        await interaction.reply({ content: `Removed role ${roleRemove.name} from ${roleRemoveUser.tag}.`, ephemeral: true });
+        const botLogsChannelRoleRemove = await getBotLogsChannel(guild);
+        if (botLogsChannelRoleRemove) {
+          await botLogsChannelRoleRemove.send(`**Roleremove Command Used**\nUser: ${interaction.user.tag}\nTarget: ${roleRemoveUser.tag}\nRole: ${roleRemove.name}\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'lock':
         const lockChannel = interaction.options.getChannel('channel');
         await lockChannel.permissionOverwrites.edit(guild.roles.everyone, { SendMessages: false });
-        await interaction.reply(`Locked ${lockChannel.name}.`);
+        await interaction.reply({ content: `Locked ${lockChannel.name}.`, ephemeral: true });
+        const botLogsChannelLock = await getBotLogsChannel(guild);
+        if (botLogsChannelLock) {
+          await botLogsChannelLock.send(`**Lock Command Used**\nUser: ${interaction.user.tag}\nChannel: ${lockChannel.name}\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'unlock':
         const unlockChannel = interaction.options.getChannel('channel');
         await unlockChannel.permissionOverwrites.edit(guild.roles.everyone, { SendMessages: null });
-        await interaction.reply(`Unlocked ${unlockChannel.name}.`);
+        await interaction.reply({ content: `Unlocked ${unlockChannel.name}.`, ephemeral: true });
+        const botLogsChannelUnlock = await getBotLogsChannel(guild);
+        if (botLogsChannelUnlock) {
+          await botLogsChannelUnlock.send(`**Unlock Command Used**\nUser: ${interaction.user.tag}\nChannel: ${unlockChannel.name}\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'slowmode':
         const slowChannel = interaction.options.getChannel('channel');
         const slowTime = interaction.options.getInteger('time');
         await slowChannel.setRateLimitPerUser(slowTime);
-        await interaction.reply(`Set slowmode in ${slowChannel.name} to ${slowTime} seconds.`);
+        await interaction.reply({ content: `Set slowmode in ${slowChannel.name} to ${slowTime} seconds.`, ephemeral: true });
+        const botLogsChannelSlowmode = await getBotLogsChannel(guild);
+        if (botLogsChannelSlowmode) {
+          await botLogsChannelSlowmode.send(`**Slowmode Command Used**\nUser: ${interaction.user.tag}\nChannel: ${slowChannel.name}\nTime: ${slowTime} seconds\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'announce':
         const announceChannel = interaction.options.getChannel('channel');
         const announceMessage = interaction.options.getString('message');
         await announceChannel.send(announceMessage);
-        await interaction.reply('Announcement sent.');
+        await interaction.reply({ content: 'Announcement sent.', ephemeral: true });
+        const botLogsChannelAnnounce = await getBotLogsChannel(guild);
+        if (botLogsChannelAnnounce) {
+          await botLogsChannelAnnounce.send(`**Announce Command Used**\nUser: ${interaction.user.tag}\nChannel: ${announceChannel.name}\nMessage: ${announceMessage}\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'ping':
         const ping = Date.now() - interaction.createdTimestamp;
-        await interaction.reply(`Pong! Latency: ${ping}ms`);
+        await interaction.reply({ content: `Pong! Latency: ${ping}ms`, ephemeral: true });
+        const botLogsChannelPing = await getBotLogsChannel(guild);
+        if (botLogsChannelPing) {
+          await botLogsChannelPing.send(`**Ping Command Used**\nUser: ${interaction.user.tag}\nLatency: ${ping}ms\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'uptime':
         const uptime = Date.now() - startTime;
         const uptimeString = `${Math.floor(uptime / 86400000)}d ${Math.floor(uptime / 3600000) % 24}h ${Math.floor(uptime / 60000) % 60}m ${Math.floor(uptime / 1000) % 60}s`;
-        await interaction.reply(`Uptime: ${uptimeString}`);
+        await interaction.reply({ content: `Uptime: ${uptimeString}`, ephemeral: true });
+        const botLogsChannelUptime = await getBotLogsChannel(guild);
+        if (botLogsChannelUptime) {
+          await botLogsChannelUptime.send(`**Uptime Command Used**\nUser: ${interaction.user.tag}\nUptime: ${uptimeString}\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'botinfo':
@@ -343,7 +414,11 @@ client.on('interactionCreate', async interaction => {
             { name: 'Uptime', value: `${Math.floor((Date.now() - startTime) / 1000)}s`, inline: true }
           )
           .setColor(0x00ff00);
-        await interaction.reply({ embeds: [botEmbed] });
+        await interaction.reply({ embeds: [botEmbed], ephemeral: true });
+        const botLogsChannelBotinfo = await getBotLogsChannel(guild);
+        if (botLogsChannelBotinfo) {
+          await botLogsChannelBotinfo.send(`**Botinfo Command Used**\nUser: ${interaction.user.tag}\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'serverinfo':
@@ -355,7 +430,11 @@ client.on('interactionCreate', async interaction => {
             { name: 'Channels', value: guild.channels.cache.size.toString(), inline: true }
           )
           .setColor(0x0000ff);
-        await interaction.reply({ embeds: [serverEmbed] });
+        await interaction.reply({ embeds: [serverEmbed], ephemeral: true });
+        const botLogsChannelServerinfo = await getBotLogsChannel(guild);
+        if (botLogsChannelServerinfo) {
+          await botLogsChannelServerinfo.send(`**Serverinfo Command Used**\nUser: ${interaction.user.tag}\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'userinfo':
@@ -370,14 +449,22 @@ client.on('interactionCreate', async interaction => {
           )
           .setThumbnail(userInfoUser.displayAvatarURL())
           .setColor(0xffff00);
-        await interaction.reply({ embeds: [userEmbed] });
+        await interaction.reply({ embeds: [userEmbed], ephemeral: true });
+        const botLogsChannelUserinfo = await getBotLogsChannel(guild);
+        if (botLogsChannelUserinfo) {
+          await botLogsChannelUserinfo.send(`**Userinfo Command Used**\nUser: ${interaction.user.tag}\nTarget: ${userInfoUser.tag}\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'roles':
         const rolesUser = interaction.options.getUser('user') || interaction.user;
         const rolesMember = await guild.members.fetch(rolesUser.id);
         const rolesList = rolesMember.roles.cache.map(r => r.name).join(', ') || 'None';
-        await interaction.reply(`${rolesUser.tag}'s roles: ${rolesList}`);
+        await interaction.reply({ content: `${rolesUser.tag}'s roles: ${rolesList}`, ephemeral: true });
+        const botLogsChannelRoles = await getBotLogsChannel(guild);
+        if (botLogsChannelRoles) {
+          await botLogsChannelRoles.send(`**Roles Command Used**\nUser: ${interaction.user.tag}\nTarget: ${rolesUser.tag}\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'avatar':
@@ -386,7 +473,11 @@ client.on('interactionCreate', async interaction => {
           .setTitle(`${avatarUser.tag}'s Avatar`)
           .setImage(avatarUser.displayAvatarURL({ size: 1024 }))
           .setColor(0xff00ff);
-        await interaction.reply({ embeds: [avatarEmbed] });
+        await interaction.reply({ embeds: [avatarEmbed], ephemeral: true });
+        const botLogsChannelAvatar = await getBotLogsChannel(guild);
+        if (botLogsChannelAvatar) {
+          await botLogsChannelAvatar.send(`**Avatar Command Used**\nUser: ${interaction.user.tag}\nTarget: ${avatarUser.tag}\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'channelinfo':
@@ -399,23 +490,39 @@ client.on('interactionCreate', async interaction => {
             { name: 'Created', value: channelInfoChannel.createdAt.toDateString(), inline: true }
           )
           .setColor(0x00ffff);
-        await interaction.reply({ embeds: [channelEmbed] });
+        await interaction.reply({ embeds: [channelEmbed], ephemeral: true });
+        const botLogsChannelChannelinfo = await getBotLogsChannel(guild);
+        if (botLogsChannelChannelinfo) {
+          await botLogsChannelChannelinfo.send(`**Channelinfo Command Used**\nUser: ${interaction.user.tag}\nChannel: ${channelInfoChannel.name}\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'invite':
         const inviteLink = `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&permissions=8&scope=bot%20applications.commands`;
-        await interaction.reply(`Invite link: ${inviteLink}`);
+        await interaction.reply({ content: `Invite link: ${inviteLink}`, ephemeral: true });
+        const botLogsChannelInvite = await getBotLogsChannel(guild);
+        if (botLogsChannelInvite) {
+          await botLogsChannelInvite.send(`**Invite Command Used**\nUser: ${interaction.user.tag}\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'randommember':
         const members = await guild.members.fetch();
         const randomMember = members.random();
-        await interaction.reply(`Random member: ${randomMember.user.tag}`);
+        await interaction.reply({ content: `Random member: ${randomMember.user.tag}`, ephemeral: true });
+        const botLogsChannelRandommember = await getBotLogsChannel(guild);
+        if (botLogsChannelRandommember) {
+          await botLogsChannelRandommember.send(`**Randommember Command Used**\nUser: ${interaction.user.tag}\nSelected: ${randomMember.user.tag}\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'countroles':
         const roleCounts = guild.roles.cache.map(role => `${role.name}: ${role.members.size}`);
-        await interaction.reply(`Role counts:\n${roleCounts.join('\n')}`);
+        await interaction.reply({ content: `Role counts:\n${roleCounts.join('\n')}`, ephemeral: true });
+        const botLogsChannelCountroles = await getBotLogsChannel(guild);
+        if (botLogsChannelCountroles) {
+          await botLogsChannelCountroles.send(`**Countroles Command Used**\nUser: ${interaction.user.tag}\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'vote':
@@ -433,12 +540,20 @@ client.on('interactionCreate', async interaction => {
               .setStyle(ButtonStyle.Primary)
             )
           );
-        await interaction.reply({ embeds: [voteEmbed], components: [row] });
+        await interaction.reply({ embeds: [voteEmbed], components: [row], ephemeral: true });
+        const botLogsChannelVote = await getBotLogsChannel(guild);
+        if (botLogsChannelVote) {
+          await botLogsChannelVote.send(`**Vote Command Used**\nUser: ${interaction.user.tag}\nQuestion: ${question}\nOptions: ${options.join(', ')}\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'say':
         const sayMessage = interaction.options.getString('message');
-        await interaction.reply(sayMessage);
+        await interaction.reply({ content: sayMessage, ephemeral: true });
+        const botLogsChannelSay = await getBotLogsChannel(guild);
+        if (botLogsChannelSay) {
+          await botLogsChannelSay.send(`**Say Command Used**\nUser: ${interaction.user.tag}\nMessage: ${sayMessage}\nTimestamp: ${new Date().toISOString()}`);
+        }
         break;
 
       case 'serverbanner':
@@ -448,14 +563,18 @@ client.on('interactionCreate', async interaction => {
             .setTitle('Server Banner')
             .setImage(bannerURL)
             .setColor(0xffa500);
-          await interaction.reply({ embeds: [bannerEmbed] });
+          await interaction.reply({ embeds: [bannerEmbed], ephemeral: true });
         } else {
-          await interaction.reply('No server banner set.');
+          await interaction.reply({ content: 'No server banner set.', ephemeral: true });
+        }
+        const botLogsChannelServerbanner = await getBotLogsChannel(guild);
+        if (botLogsChannelServerbanner) {
+          await botLogsChannelServerbanner.send(`**Serverbanner Command Used**\nUser: ${interaction.user.tag}\nTimestamp: ${new Date().toISOString()}`);
         }
         break;
 
       default:
-        await interaction.reply('Unknown command.');
+        await interaction.reply({ content: 'Unknown command.', ephemeral: true });
     }
   } catch (error) {
     console.error(error);

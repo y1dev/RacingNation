@@ -9,3 +9,5 @@
 - [x] Handle command interactions and execute logic
 - [x] Add error handling and logging
 - [x] Run npm install and test bot startup
+- [x] Make all command responses ephemeral
+- [x] Add logging to bot-logs channel for command usage
