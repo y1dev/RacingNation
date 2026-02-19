@@ -22,6 +22,19 @@ const userCrews = new Map(); // Crew storage
 const dailyChallengeLog = new Map(); // Track daily challenge completion
 const achievements = new Map(); // User achievements
 const helpCommandUsed = new Set(); // Track which guilds have used help command
+const appeals = new Map(); // User appeals for bans
+const guildMemberCounts = new Map(); // Track member milestones
+const raidMode = new Set(); // Guilds in raid mode
+const bannedContent = [
+  // Racial slurs and hate speech (filtered list)
+  /n[i1]gg[a3]r|n[i1]gg[a3]h|n[i1]gg3r/gi,
+  /f[a4]gg[o0]t|f[a4]gg1t/gi,
+  /wh[i1]tey|cracker|honk[e3]y/gi,
+  /sand n|towel head|camel jockey/gi,
+  // NSFW keywords
+  /\bp[o0rn]|xxx|sex tape|nudes|horny|onlyfans/gi,
+  /b[o0]obs|ass|tits|c[o0]ck|pussy/gi
+];
 
 // Default user profile structure
 function createUserProfile(userId) {
@@ -329,6 +342,27 @@ const commands = [
   new SlashCommandBuilder()
     .setName('help')
     .setDescription('Display all available bot commands (one-time use per server).'),
+
+  new SlashCommandBuilder()
+    .setName('raidmode')
+    .setDescription('Toggle raid mode - locks all channels (Race Director only).')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName('softban')
+    .setDescription('Kick user and delete their last 7 days of messages.')
+    .addUserOption(option => option.setName('user').setDescription('The user to softban').setRequired(true))
+    .addStringOption(option => option.setName('reason').setDescription('Reason for softban').setRequired(false))
+    .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
+
+  new SlashCommandBuilder()
+    .setName('infractions')
+    .setDescription('View all infractions (warnings, mutes, kicks, bans) on a user.')
+    .addUserOption(option => option.setName('user').setDescription('The user to check').setRequired(true)),
+
+  new SlashCommandBuilder()
+    .setName('appeal')
+    .setDescription('Appeal your ban (mods will review).'),
 ];
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
@@ -347,6 +381,60 @@ client.once('ready', async () => {
     console.log('Successfully reloaded application (/) commands.');
   } catch (error) {
     console.error(error);
+  }
+});
+
+// Message content filter
+client.on('messageCreate', async message => {
+  if (message.author.bot || !message.guild) return;
+  
+  let foundBanned = false;
+  let bannedType = '';
+  
+  for (const regex of bannedContent) {
+    if (regex.test(message.content)) {
+      foundBanned = true;
+      bannedType = message.content.match(/nig|fagg|sand|porn|xxx|nud|horny/) ? 'Hate Speech/Slur' : 'NSFW Content';
+      break;
+    }
+  }
+  
+  if (foundBanned) {
+    try {
+      await message.delete();
+      const modsChannel = message.guild.channels.cache.find(c => c.name === 'bot-logs');
+      if (modsChannel) {
+        const reportEmbed = new EmbedBuilder()
+          .setTitle('⚠️ Content Filter Alert')
+          .addFields(
+            { name: 'Type', value: bannedType, inline: true },
+            { name: 'User', value: message.author.tag, inline: true },
+            { name: 'Channel', value: message.channel.name, inline: true },
+            { name: 'Message', value: message.content.substring(0, 100), inline: false }
+          )
+          .setColor(0xff0000);
+        await modsChannel.send({ embeds: [reportEmbed] });
+      }
+    } catch (err) {
+      console.error(`Could not delete message: ${err}`);
+    }
+  }
+});
+
+// Member milestone tracking
+client.on('guildMemberAdd', async member => {
+  const guild = member.guild;
+  const memberCount = guild.memberCount;
+  
+  if (memberCount % 50 === 0 || memberCount % 100 === 0) {
+    const announceChannel = guild.channels.cache.find(c => c.name === 'announcements' || c.name === 'general');
+    if (announceChannel && announceChannel.isTextBased()) {
+      const milestoneEmbed = new EmbedBuilder()
+        .setTitle('🎉 Milestone Reached!')
+        .setDescription(`Welcome to our ${memberCount}th member!`)
+        .setColor(0x00ff00);
+      await announceChannel.send({ embeds: [milestoneEmbed] });
+    }
   }
 });
 
@@ -441,12 +529,36 @@ client.on('interactionCreate', async interaction => {
         const userWarnings = warnings.get(warnUser.id) || [];
         userWarnings.push({ reason: warnReason, date: new Date() });
         warnings.set(warnUser.id, userWarnings);
+        const warnCount = userWarnings.length;
+        
         await sendModerationDM(warnUser, 'You have been warned', warnReason);
-        logModerationAction({ action: 'warn', executor: interaction.user.tag, target: warnUser.tag, reason: warnReason, warningCount: userWarnings.length });
-        await interaction.reply({ content: `Warned ${warnUser.tag} for: ${warnReason} (Total warnings: ${userWarnings.length})`, ephemeral: true });
+        logModerationAction({ action: 'warn', executor: interaction.user.tag, target: warnUser.tag, reason: warnReason, warningCount: warnCount });
+        
+        let autoAction = '';
+        // Auto-actions for warn limits
+        if (warnCount === 3) {
+          try {
+            const warnMember = await guild.members.fetch(warnUser.id);
+            await warnMember.kick('Auto-kicked: 3 warnings reached');
+            autoAction = '\n⚠️ **Auto-Action: User kicked (3 warnings)**';
+            logModerationAction({ action: 'kick', executor: 'Auto-System', target: warnUser.tag, reason: '3 warnings auto-kick' });
+          } catch (err) {
+            autoAction = '\n❌ Could not auto-kick user';
+          }
+        } else if (warnCount === 5) {
+          try {
+            await guild.members.ban(warnUser, { reason: 'Auto-banned: 5 warnings reached' });
+            autoAction = '\n⚠️ **Auto-Action: User banned (5 warnings)**';
+            logModerationAction({ action: 'ban', executor: 'Auto-System', target: warnUser.tag, reason: '5 warnings auto-ban' });
+          } catch (err) {
+            autoAction = '\n❌ Could not auto-ban user';
+          }
+        }
+        
+        await interaction.reply({ content: `Warned ${warnUser.tag} for: ${warnReason} (Total warnings: ${warnCount})${autoAction}`, ephemeral: true });
         const botLogsChannelWarn = await getBotLogsChannel(guild);
         if (botLogsChannelWarn) {
-          await botLogsChannelWarn.send(`**Warn Command Used**\nUser: ${interaction.user.tag}\nTarget: ${warnUser.tag}\nReason: ${warnReason}\nTotal Warnings: ${userWarnings.length}\nTimestamp: ${new Date().toISOString()}`);
+          await botLogsChannelWarn.send(`**Warn Command Used**\nUser: ${interaction.user.tag}\nTarget: ${warnUser.tag}\nReason: ${warnReason}\nTotal Warnings: ${warnCount}${autoAction}\nTimestamp: ${new Date().toISOString()}`);
         }
         break;
 
@@ -1112,6 +1224,119 @@ client.on('interactionCreate', async interaction => {
         
         const msg = await interaction.reply({ embeds: [helpEmbed] });
         await msg.pin();
+        break;
+
+      case 'raidmode':
+        // Check for Race Director role
+        const raceDirectorRole = guild.roles.cache.find(r => r.name === 'Race Director');
+        if (!raceDirectorRole || !member.roles.cache.has(raceDirectorRole.id)) {
+          // Also allow bot admins
+          if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
+            return interaction.reply({ content: 'Only Race Director or Server Admin can activate raid mode!', ephemeral: true });
+          }
+        }
+        
+        const isRaidMode = raidMode.has(guild.id);
+        if (isRaidMode) {
+          raidMode.delete(guild.id);
+          // Unlock all channels
+          const channels = guild.channels.cache.filter(ch => ch.isTextBased());
+          for (const [, channel] of channels) {
+            try {
+              await channel.permissionOverwrites.edit(guild.roles.everyone, { SendMessages: null });
+            } catch (err) {
+              console.error(`Could not unlock ${channel.name}`);
+            }
+          }
+          await interaction.reply({ content: '🟢 **Raid mode DISABLED** - All channels unlocked.', ephemeral: false });
+          logModerationAction({ action: 'raidmode-disable', executor: interaction.user.tag, target: 'Guild', reason: 'Raid mode disabled' });
+        } else {
+          raidMode.add(guild.id);
+          // Lock all channels
+          const channels = guild.channels.cache.filter(ch => ch.isTextBased());
+          for (const [, channel] of channels) {
+            try {
+              await channel.permissionOverwrites.edit(guild.roles.everyone, { SendMessages: false });
+            } catch (err) {
+              console.error(`Could not lock ${channel.name}`);
+            }
+          }
+          await interaction.reply({ content: '🔴 **RAID MODE ACTIVATED** - All channels locked. Use `/raidmode` to disable.', ephemeral: false });
+          logModerationAction({ action: 'raidmode-enable', executor: interaction.user.tag, target: 'Guild', reason: 'Raid mode activated' });
+        }
+        break;
+
+      case 'softban':
+        const softbanUser = interaction.options.getUser('user');
+        const softbanReason = interaction.options.getString('reason') || 'No reason provided';
+        try {
+          const softbanMember = await guild.members.fetch(softbanUser.id);
+          // Delete 7 days of messages
+          const messages = await interaction.channel.messages.fetch({ limit: 100 });
+          const userMessages = messages.filter(m => m.author.id === softbanUser.id && (Date.now() - m.createdTimestamp) < 7 * 24 * 60 * 60 * 1000);
+          for (const [, msg] of userMessages) {
+            try {
+              await msg.delete();
+            } catch (err) {
+              console.error(`Could not delete message: ${err}`);
+            }
+          }
+          // Kick user
+          await softbanMember.kick(softbanReason);
+          await sendModerationDM(softbanUser, 'You have been softbanned', softbanReason);
+          logModerationAction({ action: 'softban', executor: interaction.user.tag, target: softbanUser.tag, reason: softbanReason });
+          await interaction.reply({ content: `✅ Softbanned ${softbanUser.tag} and deleted last 7 days of messages. Reason: ${softbanReason}`, ephemeral: true });
+        } catch (err) {
+          await interaction.reply({ content: `❌ Failed to softban user: ${err.message}`, ephemeral: true });
+        }
+        break;
+
+      case 'infractions':
+        const infractionUser = interaction.options.getUser('user');
+        const userInfractions = moderationLogs.filter(log => log.target === infractionUser.tag);
+        
+        if (userInfractions.length === 0) {
+          return interaction.reply({ content: `No infractions found for ${infractionUser.tag}.`, ephemeral: true });
+        }
+        
+        const infractionEmbed = new EmbedBuilder()
+          .setTitle(`📋 Infractions for ${infractionUser.tag}`)
+          .setColor(0xff0000);
+        
+        userInfractions.forEach((infr, index) => {
+          const infrText = `**${infr.action.toUpperCase()}** by ${infr.executor}\nReason: ${infr.reason || 'N/A'}\nDate: ${infr.timestamp.toDateString()}`;
+          infractionEmbed.addFields({ name: `#${index + 1}`, value: infrText, inline: false });
+        });
+        
+        infractionEmbed.setFooter({ text: `Total infractions: ${userInfractions.length}` });
+        await interaction.reply({ embeds: [infractionEmbed], ephemeral: true });
+        break;
+
+      case 'appeal':
+        const banStatus = await guild.bans.fetch(interaction.user.id).catch(() => null);
+        if (!banStatus) {
+          return interaction.reply({ content: 'You are not banned from this server.', ephemeral: true });
+        }
+        
+        if (appeals.has(interaction.user.id)) {
+          return interaction.reply({ content: 'You already have a pending appeal. Wait for mod response.', ephemeral: true });
+        }
+        
+        appeals.set(interaction.user.id, { user: interaction.user.tag, userId: interaction.user.id, date: new Date(), status: 'pending' });
+        
+        const modsChannel = guild.channels.cache.find(c => c.name === 'bot-logs');
+        if (modsChannel) {
+          const appealEmbed = new EmbedBuilder()
+            .setTitle('🔔 Ban Appeal Submitted')
+            .addFields(
+              { name: 'User', value: interaction.user.tag, inline: true },
+              { name: 'Date', value: new Date().toDateString(), inline: true }
+            )
+            .setColor(0xffaa00);
+          await modsChannel.send({ embeds: [appealEmbed] });
+        }
+        
+        await interaction.reply({ content: '✅ Appeal submitted! Moderators will review it.', ephemeral: true });
         break;
 
       default:
