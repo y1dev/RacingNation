@@ -363,6 +363,13 @@ const commands = [
   new SlashCommandBuilder()
     .setName('appeal')
     .setDescription('Appeal your ban (mods will review).'),
+
+  new SlashCommandBuilder()
+    .setName('time')
+    .setDescription('Submit your lap time.')
+    .addNumberOption(option => option.setName('laptime').setDescription('Your lap time in seconds').setRequired(true))
+    .addStringOption(option => option.setName('track').setDescription('Track name').setRequired(true))
+    .addStringOption(option => option.setName('game').setDescription('Game title').setRequired(true)),
 ];
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
@@ -417,6 +424,15 @@ client.on('messageCreate', async message => {
       }
     } catch (err) {
       console.error(`Could not delete message: ${err}`);
+    }
+  }
+
+  // Auto-delete non-command messages in lap-times channel
+  if (message.channel.name === 'lap-times' && !message.content.startsWith('/')) {
+    try {
+      await message.delete();
+    } catch (err) {
+      console.error(`Could not delete message from lap-times: ${err}`);
     }
   }
 });
@@ -1337,6 +1353,37 @@ client.on('interactionCreate', async interaction => {
         }
         
         await interaction.reply({ content: '✅ Appeal submitted! Moderators will review it.', ephemeral: true });
+        break;
+
+      case 'time':
+        const lapTime = interaction.options.getNumber('laptime');
+        const track = interaction.options.getString('track');
+        const game = interaction.options.getString('game');
+        
+        // Format MM:SS.ms
+        const minutes = Math.floor(lapTime / 60);
+        const seconds = Math.floor(lapTime % 60);
+        const milliseconds = Math.round((lapTime % 1) * 1000);
+        const formattedTime = `${minutes}:${String(seconds).padStart(2, '0')}.${String(milliseconds).padStart(3, '0')}`;
+        
+        const lapTimesChannel = guild.channels.cache.find(c => c.name === 'lap-times');
+        if (!lapTimesChannel) {
+          return interaction.reply({ content: 'No #lap-times channel found on this server.', ephemeral: true });
+        }
+        
+        const lapTimeEmbed = new EmbedBuilder()
+          .setTitle('🏁 New Lap Time Submitted')
+          .addFields(
+            { name: 'Driver', value: interaction.user.username, inline: true },
+            { name: 'Lap Time', value: formattedTime, inline: true },
+            { name: 'Track', value: track, inline: true },
+            { name: 'Game', value: game, inline: true }
+          )
+          .setColor(0x00ff00)
+          .setThumbnail(interaction.user.avatarURL());
+        
+        await lapTimesChannel.send({ embeds: [lapTimeEmbed] });
+        await interaction.reply({ content: `✅ Lap time of **${formattedTime}** submitted to #lap-times!`, ephemeral: true });
         break;
 
       default:
