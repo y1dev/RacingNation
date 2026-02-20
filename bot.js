@@ -1395,4 +1395,10 @@ client.on('interactionCreate', async interaction => {
   }
 });
 
+client.on('messageCreate', message => {
+    if (message.channel.name === 'partners' && !message.author.bot) {
+        message.delete();
+    }
+});
+
 client.login(TOKEN);
