@@ -1401,4 +1401,10 @@ client.on('messageCreate', message => {
     }
 });
 
+client.once('ready', async () => {
+    console.log(`✅ Logged in as ${client.user.tag}`);
+    client.user.setActivity('Probably spying on XV', { type: ActivityType.Watching });
+    await registerCommands();
+});
+
 client.login(TOKEN);
